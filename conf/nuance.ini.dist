@@ -1,6 +1,6 @@
-app_id = ""
-app_key = ""
-user_id = 1
-asr_uri = "dictation.nuancemobility.net/NMDPAsrCmdServlet/dictation"
-tts_uri = "tts.nuancemobility.net:443/NMDPTTSCmdServlet/tts"
+app_id =
+app_key =
+user_opaque_id = 1
+asr_uri = dictation.nuancemobility.net/NMDPAsrCmdServlet/dictation
+tts_uri = tts.nuancemobility.net:443/NMDPTTSCmdServlet/tts
 
