@@ -1,0 +1,7 @@
+[package]
+name = "nuance-rs"
+version = "0.1.0"
+authors = ["Julien Wajsberg <felash@gmail.com>"]
+
+[dependencies]
+rust-ini = "0.9.4"
