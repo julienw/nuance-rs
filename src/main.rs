@@ -3,9 +3,9 @@ extern crate hyper;
 #[macro_use]
 extern crate log;
 extern crate env_logger;
-extern crate portaudio;
+extern crate alsa;
 
-use portaudio as pa;
+use std::io::{ Read, Write };
 
 const NUANCE_CONF_FILE: &'static str = "conf/nuance.ini";
 
@@ -46,29 +46,42 @@ fn read_conf() -> NuanceConfig {
     }
 }
 
-fn play_sound() -> Result<(), pa::Error> {
-    const SAMPLE_RATE: f64 = 44_100.0;
-    const FRAMES: u32 = 256;
-    const CHANNELS: i32 = 2;
-    const INTERLEAVED: bool = true;
+fn play_sound(sound: &[u8]) {
+    use std::ffi::CString;
+    use alsa::{Direction, ValueOr};
+    use alsa::pcm::{PCM, HwParams, Format, Access, State};
 
-    let pa = try!(pa::PortAudio::new());
+    // Open default playback device
+    let pcm = PCM::open(&*CString::new("default").unwrap(), Direction::Playback, false).unwrap();
 
-    let def_output = try!(pa.default_output_device());
-    let output_info = try!(pa.device_info(def_output));
-    info!("Default output device info: {:#?}", &output_info);
+    // Set hardware parameters: 8 kHz / Mono / 16 bit
+    let hwp = HwParams::any(&pcm).unwrap();
+    hwp.set_channels(1).unwrap();
+    hwp.set_rate(8000, ValueOr::Nearest).unwrap();
+    hwp.set_format(Format::s16()).unwrap();
+    hwp.set_access(Access::RWInterleaved).unwrap();
+    pcm.hw_params(&hwp).unwrap();
+    let mut io = pcm.io_i16().unwrap();
 
-    /*
-    // Construct the output stream parameters.
-    let latency = output_info.default_low_output_latency;
-    let output_params = pa::StreamParameters::new(def_output, CHANNELS, INTERLEAVED, latency);
-    */
-    Ok(())
+    // Make a sine wave
+    let mut buf = [0i16; 1024];
+    for (i, a) in buf.iter_mut().enumerate() {
+        *a = ((i as f32 * 2.0 * ::std::f32::consts::PI / 128.0).sin() * 8192.0) as i16
+    }
+
+    //io.writei(sound).unwrap();
+    io.write_all(sound).unwrap();
+
+    // In case the buffer was larger than 2 seconds, start the stream manually.
+    if pcm.state() != State::Running { pcm.start().unwrap() };
+    // Wait for the stream to finish playback.
+    pcm.drain().unwrap();
 }
 
 fn main() {
     use hyper::{ Client, Url };
-    use hyper::header;
+    use hyper::header::{ ContentType, Accept, qitem };
+    use hyper::mime::Mime;
 
     env_logger::init().unwrap();
 
@@ -84,12 +97,17 @@ fn main() {
         .append_pair("id", &conf.user_opaque_id)
         .append_pair("voice", "Amelie");
 
-    info!("Will use the url {}", url);
+    let audio_mime: Mime = "audio/x-wav;codec=pcm;bit=16;rate=8000".parse().unwrap();
 
-    let res = client.post(url)
-        .header(header::ContentType::plaintext())
-        .body("Salut aujourd'hui c'est l'été !")
+    let mut res = client.post(url)
+        .header(ContentType::plaintext())
+        .header(Accept(vec![qitem(audio_mime)]))
+        .body("Salut aujourd'hui c'est l'été ! J'ai envie d'aller au cinéma, pas toi ?")
         .send().unwrap();
 
     info!("got result {:?}", res);
+
+    let mut body = Vec::new();
+    res.read_to_end(&mut body).unwrap();
+    play_sound(&body);
 }
