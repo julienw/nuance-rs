@@ -3,7 +3,8 @@ extern crate hyper;
 #[macro_use]
 extern crate log;
 extern crate env_logger;
-extern crate alsa;
+
+extern crate portaudio;
 
 mod nuance;
 mod types;
@@ -11,40 +12,53 @@ mod types;
 use nuance::Nuance;
 use types::*;
 
-fn play_sound(sound: &Sound, frequency: Frequency) {
-    use std::ffi::CString;
-    use alsa::{Direction, ValueOr};
-    use alsa::pcm::{PCM, HwParams, Format, Access, State};
+fn play_frames<T: portaudio::Sample + 'static>(frames: &[T], frequency: Frequency) -> Result<(), portaudio::Error> {
+    let portaudio = try!(portaudio::PortAudio::new());
 
-    // Open default playback device
-    let pcm = PCM::open(&*CString::new("default").unwrap(), Direction::Playback, false).unwrap();
+    let def_output = try!(portaudio.default_output_device());
+    let output_info = try!(portaudio.device_info(def_output));
+    println!("Default output device info: {:#?}", &output_info);
 
-    // Set hardware parameters coming from parameters
-    let hwp = HwParams::any(&pcm).unwrap();
-    hwp.set_channels(1).unwrap();
-    hwp.set_rate(u32::from(frequency), ValueOr::Nearest).unwrap();
-    let format = match sound {
-        &Sound::Bits_8(_) => Format::S8,
-        &Sound::Bits_16(_) => Format::s16(),
-    };
-    hwp.set_format(format).unwrap();
-    hwp.set_access(Access::RWInterleaved).unwrap();
-    pcm.hw_params(&hwp).unwrap();
-    match sound {
-        &Sound::Bits_8(ref sound) => {
-            let io = pcm.io_i8().unwrap();
-            io.writei(sound).unwrap();
-        }
-        &Sound::Bits_16(ref sound) => {
-            let io = pcm.io_i16().unwrap();
-            io.writei(sound).unwrap();
-        }
+    // Construct the output stream parameters.
+    let latency = output_info.default_high_output_latency;
+    let output_params = portaudio::StreamParameters::<T>::new(def_output, /* channels */ 1, /* interleaved */ true, latency);
+
+    // Check that the stream format is supported.
+    try!(portaudio.is_output_format_supported(output_params, u32::from(frequency) as f64));
+    let settings = portaudio::OutputStreamSettings::new(output_params, u32::from(frequency) as f64, 1024);
+
+    let mut stream = try!(portaudio.open_blocking_stream(settings));
+    try!(stream.start());
+
+    let mut count: usize = 0;
+    while count < frames.len() {
+        let available = try!(stream.write_available());
+
+        let available = match available {
+            portaudio::StreamAvailable::Frames(available) => available as u32,
+            portaudio::StreamAvailable::InputOverflowed => { println!("Input stream has overflowed"); continue }
+            portaudio::StreamAvailable::OutputUnderflowed => { println!("Output stream has underflowed"); continue }
+        };
+
+        let will_write = std::cmp::min(available, (frames.len() - count) as u32);
+
+        try!(stream.write(will_write, |output| {
+            for i in 0..output.len() {
+                output[i] = frames[count];
+                count += 1;
+            }
+        }));
     }
 
-    // In case the buffer was larger than 2 seconds, start the stream manually.
-    if pcm.state() != State::Running { pcm.start().unwrap() };
-    // Wait for the stream to finish playback.
-    pcm.drain().unwrap();
+    try!(stream.close());
+    Ok(())
+}
+
+fn play_sound(sound: &Sound, frequency: Frequency) -> Result<(), portaudio::Error> {
+    match sound {
+        &Sound::Bits_8(ref frames) => play_frames(frames, frequency),
+        &Sound::Bits_16(ref frames) => play_frames(frames, frequency),
+    }
 }
 
 /*
