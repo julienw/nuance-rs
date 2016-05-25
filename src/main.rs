@@ -1,13 +1,19 @@
 extern crate ini;
+#[macro_use]
 extern crate hyper;
 #[macro_use]
 extern crate log;
 extern crate env_logger;
 
 extern crate portaudio;
+#[macro_use]
+extern crate language_tags;
 
 mod nuance;
 mod types;
+
+use std::sync::mpsc;
+use std::time::{ Duration, Instant };
 
 use nuance::Nuance;
 use types::*;
@@ -61,16 +67,67 @@ fn play_sound(sound: &Sound, frequency: Frequency) -> Result<(), portaudio::Erro
     }
 }
 
-/*
-fn record_sound(bitrate: Bitrate, frequency: Frequency, Sender<&[u8]>) {
+fn record_sound(bitrate: Bitrate, frequency: Frequency, duration: Duration, sender: mpsc::Sender<Sound>) -> Result<(), portaudio::Error> {
+    match frequency {
+        Frequency::Freq_8000 | Frequency::Freq_16000 => {}
+        _ => panic!("Incorrect frequency was given, only 8k and 16k are supported.")
+    }
 
+    let portaudio = try!(portaudio::PortAudio::new());
+
+    let def_input = try!(portaudio.default_input_device());
+    let input_info = try!(portaudio.device_info(def_input));
+    println!("Default input device info: {:#?}", &input_info);
+
+    // Construct the input stream parameters.
+    let latency = input_info.default_low_input_latency;
+    let input_params = portaudio::StreamParameters::<i8>::new(def_input, /* channels */ 1, /* interleaved */ true, latency);
+
+    // Check that the stream format is supported.
+    try!(portaudio.is_input_format_supported(input_params, u32::from(frequency) as f64));
+    let settings = portaudio::InputStreamSettings::new(input_params, u32::from(frequency) as f64, 1024);
+
+    let start_instant = Instant::now();
+
+    let mut stream = try!(portaudio.open_non_blocking_stream(settings, move |parameters| {
+        let buffer = parameters.buffer;
+        sender.send(Sound::Bits_8(buffer.to_vec()));
+
+        if start_instant.elapsed() > duration {
+            println!("Ending recording.");
+            portaudio::StreamCallbackResult::Complete
+        } else {
+            portaudio::StreamCallbackResult::Continue
+        }
+
+    }));
+
+    try!(stream.start());
+
+    Ok(())
 }
-*/
+
+fn test_tts() {
+    let nuance = Nuance::new();
+    let result = nuance.tts("Salut aujourd'hui c'est l'été ! J'ai envie d'aller au cinéma, pas toi ?");
+    play_sound(&result.sound, result.frequency).unwrap();
+}
+
+fn test_stt() {
+    let (audio_sender, audio_receiver) = mpsc::channel();
+
+    let bitrate = Bitrate::Bits_8;
+    let frequency = Frequency::Freq_8000;
+
+    println!("Starting Nuance request...");
+    let nuance = Nuance::with_bitrate_frequency(bitrate, frequency);
+    let result = nuance.stt(audio_receiver, langtag!(eng;;;USA));
+    println!("Recording sound...");
+    record_sound(bitrate, frequency, Duration::from_secs(20), audio_sender).unwrap();
+}
 
 fn main() {
     env_logger::init().unwrap();
 
-    let nuance = Nuance::new();
-    let result = nuance.tts("Salut aujourd'hui c'est l'été ! J'ai envie d'aller au cinéma, pas toi ?");
-    play_sound(&result.sound, result.frequency);
+    test_stt();
 }
