@@ -14,6 +14,7 @@ mod types;
 
 use std::sync::mpsc;
 use std::time::{ Duration, Instant };
+use std::thread;
 
 use nuance::Nuance;
 use types::*;
@@ -81,17 +82,16 @@ fn record_sound(bitrate: Bitrate, frequency: Frequency, duration: Duration, send
 
     // Construct the input stream parameters.
     let latency = input_info.default_low_input_latency;
-    let input_params = portaudio::StreamParameters::<i8>::new(def_input, /* channels */ 1, /* interleaved */ true, latency);
+    let input_params = portaudio::StreamParameters::<u8>::new(def_input, /* channels */ 1, /* interleaved */ true, latency);
 
     // Check that the stream format is supported.
     try!(portaudio.is_input_format_supported(input_params, u32::from(frequency) as f64));
-    let settings = portaudio::InputStreamSettings::new(input_params, u32::from(frequency) as f64, 1024);
+    let settings = portaudio::InputStreamSettings::new(input_params, u32::from(frequency) as f64, 256);
 
     let start_instant = Instant::now();
 
-    let mut stream = try!(portaudio.open_non_blocking_stream(settings, move |parameters| {
-        let buffer = parameters.buffer;
-        sender.send(Sound::Bits_8(buffer.to_vec()));
+    let callback = move |portaudio::InputStreamCallbackArgs { buffer, .. }| {
+        sender.send(Sound::from_vec_u8(buffer.to_vec()));
 
         if start_instant.elapsed() > duration {
             println!("Ending recording.");
@@ -99,11 +99,17 @@ fn record_sound(bitrate: Bitrate, frequency: Frequency, duration: Duration, send
         } else {
             portaudio::StreamCallbackResult::Continue
         }
+    };
 
-    }));
+    let mut stream = try!(portaudio.open_non_blocking_stream(settings, callback));
 
     try!(stream.start());
 
+    while try!(stream.is_active()) {
+        thread::sleep(Duration::from_secs(1));
+    }
+
+    try!(stream.stop());
     Ok(())
 }
 
@@ -123,6 +129,7 @@ fn test_stt() {
     let nuance = Nuance::with_bitrate_frequency(bitrate, frequency);
     let result = nuance.stt(audio_receiver, langtag!(eng;;;USA));
     println!("Recording sound...");
+
     record_sound(bitrate, frequency, Duration::from_secs(20), audio_sender).unwrap();
 }
 

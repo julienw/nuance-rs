@@ -58,3 +58,10 @@ pub enum Sound {
     Bits_8(Vec<i8>),
     Bits_16(Vec<i16>),
 }
+
+impl Sound {
+    pub fn from_vec_u8(mut vec: Vec<u8>) -> Sound {
+        let vec_i8 = vec.drain(..).map(|frame| frame as i8).collect();
+        Sound::Bits_8(vec_i8)
+    }
+}

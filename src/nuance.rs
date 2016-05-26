@@ -1,6 +1,7 @@
 use std::sync::mpsc;
 use std::{ cmp, fmt, thread };
-use std::io::{ Read, Result as IoResult, Error as IoError, ErrorKind as IoErrorKind };
+use std::io::{ Read, Write };
+use std::io;
 
 use hyper::{ Client, Url };
 use hyper::client::{ Request, Response };
@@ -147,7 +148,8 @@ impl Nuance {
         let frequency = self.frequency;
         let handle = thread::spawn(move || {
             let mut body = ReceiverBody::new(audio_receiver);
-            let nuance_stt = NuanceStt::start_request(&config, language, bitrate, frequency, &mut body);
+            let mut nuance_stt = NuanceStt::start_request(&config, language, bitrate, frequency, &mut body);
+            io::copy(&mut nuance_stt.response, &mut io::stdout()).unwrap();
         });
 
         SttResponse {
@@ -171,7 +173,7 @@ impl ReceiverBody {
         }
     }
 
-    fn clone_to_buffer(&mut self, dest: &mut [u8]) -> IoResult<usize> {
+    fn clone_to_buffer(&mut self, dest: &mut [u8]) -> io::Result<usize> {
         let (written_length, source_length) = {
             let source = self.current.as_ref().unwrap();
             let counter = self.counter;
@@ -191,7 +193,7 @@ impl ReceiverBody {
 }
 
 impl Read for ReceiverBody {
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.current.is_none() {
             let data = match self.receiver.recv() {
                 Err(_) => return Ok(0),
@@ -200,7 +202,7 @@ impl Read for ReceiverBody {
             match data {
                 Sound::Bits_8(data) => self.current = Some(data),
                 Sound::Bits_16(data) => {
-                    return Err(IoError::new(IoErrorKind::InvalidData,
+                    return Err(io::Error::new(io::ErrorKind::InvalidData,
                                             "We do not support 16 bits payload yet."))
                 }
             }
