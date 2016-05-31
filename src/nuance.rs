@@ -1,15 +1,17 @@
 use std::sync::mpsc;
 use std::{ cmp, fmt, thread };
-use std::io::{ Read, Write };
+use std::io::{ Read, BufRead, BufReader };
 use std::io;
 
 use hyper::{ Client, Url };
-use hyper::client::{ Request, Response };
-use hyper::net::Streaming;
 use hyper::header::{ ContentType, Accept, AcceptLanguage, Encoding, TransferEncoding, qitem };
 use hyper::mime::{ Mime, TopLevel, SubLevel };
 use hyper::LanguageTag;
+
+use byteorder::{ LittleEndian, WriteBytesExt };
+
 use types::*;
+
 
 const NUANCE_CONF_FILE: &'static str = "conf/nuance.ini";
 
@@ -84,7 +86,7 @@ impl Nuance {
         Nuance {
             bitrate: bitrate,
             frequency: frequency,
-            config: NuanceConfig::load().sanitize(),
+            .. Nuance::new()
         }
     }
 
@@ -146,10 +148,14 @@ impl Nuance {
         let config = self.config.clone();
         let bitrate = self.bitrate;
         let frequency = self.frequency;
-        let handle = thread::spawn(move || {
+        thread::spawn(move || {
             let mut body = ReceiverBody::new(audio_receiver);
-            let mut nuance_stt = NuanceStt::start_request(&config, language, bitrate, frequency, &mut body);
-            io::copy(&mut nuance_stt.response, &mut io::stdout()).unwrap();
+            let nuance_res = NuanceStt::request(&config, language, bitrate, frequency, &mut body);
+
+            let lines = nuance_res.response;
+            for line in lines {
+                text_sender.send(line).unwrap();
+            }
         });
 
         SttResponse {
@@ -160,7 +166,7 @@ impl Nuance {
 
 struct ReceiverBody {
     receiver: mpsc::Receiver<Sound>,
-    current: Option<Vec<i8>>,
+    current: Option<Vec<u8>>,
     counter: usize,
 }
 
@@ -179,7 +185,7 @@ impl ReceiverBody {
             let counter = self.counter;
             let length = cmp::min(source.len() - counter, dest.len());
             for i in 0..length {
-                dest[i] = source[counter + i] as u8;
+                dest[i] = source[counter + i];
             }
             //println!("{:?}", dest);
             self.counter = counter + length;
@@ -200,13 +206,16 @@ impl Read for ReceiverBody {
                 Err(_) => return Ok(0),
                 Ok(data) => data
             };
-            match data {
-                Sound::Bits_8(data) => self.current = Some(data),
-                Sound::Bits_16(data) => {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                            "We do not support 16 bits payload yet."))
+            self.current = Some(match data {
+                Sound::Bits_8(mut data) => data.drain(..).map(|b| b as u8).collect(),
+                Sound::Bits_16(mut data) => {
+                    let mut result: Vec<u8> = Vec::new();
+                    for item in data.drain(..) {
+                        try!(result.write_i16::<LittleEndian>(item));
+                    }
+                    result
                 }
-            }
+            });
         }
 
         self.clone_to_buffer(buf)
@@ -245,11 +254,11 @@ impl ::std::str::FromStr for DictationAudioSource {
 header! { (XDictationAudioSource, "X-Dictation-AudioSource") => [DictationAudioSource] }
 
 struct NuanceStt {
-    response: Response,
+    response: Vec<String>,
 }
 
 impl NuanceStt {
-    fn start_request<R: Read>(config: &NuanceConfig, language: LanguageTag, bitrate: Bitrate, frequency: Frequency, body: &mut R) -> NuanceStt {
+    fn request<B: Read>(config: &NuanceConfig, language: LanguageTag, bitrate: Bitrate, frequency: Frequency, body: &mut B) -> NuanceStt {
         let client = Client::new();
         let mut url = Url::parse(&config.stt_uri).unwrap();
         url.query_pairs_mut()
@@ -261,19 +270,20 @@ impl NuanceStt {
                                  u8::from(bitrate), u32::from(frequency));
         let audio_mime: Mime = audio_mime.parse().unwrap();
 
-        let mut res = client.post(url)
+        let res = client.post(url)
             .header(ContentType(audio_mime))
             .header(Accept(vec![qitem(Mime(TopLevel::Text, SubLevel::Plain, vec![]))]))
             .header(AcceptLanguage(vec![qitem(language)]))
             .header(TransferEncoding(vec![Encoding::Chunked]))
             .header(XDictationAudioSource(DictationAudioSource::SpeakerAndMicrophone))
             .body(body)
-            .send().unwrap();
+            .send()
+            .unwrap();
 
-        info!("got result {:?}", res);
+        debug!("got result {:?}", res);
 
         NuanceStt {
-            response: res
+            response: BufReader::new(res).lines().filter_map(|possible_line| possible_line.ok()).collect()
         }
     }
 }

@@ -9,11 +9,13 @@ extern crate portaudio;
 #[macro_use]
 extern crate language_tags;
 
+extern crate byteorder;
+
 mod nuance;
 mod types;
 
 use std::sync::mpsc;
-use std::time::{ Duration, Instant };
+use std::time::Duration;
 use std::{ io, thread };
 use std::sync::Arc;
 use std::sync::atomic::{ AtomicBool, Ordering };
@@ -70,7 +72,7 @@ fn play_sound(sound: &Sound, frequency: Frequency) -> Result<(), portaudio::Erro
     }
 }
 
-fn record_sound(bitrate: Bitrate, frequency: Frequency, should_stop: Arc<AtomicBool>, sender: mpsc::Sender<Sound>) -> Result<(), portaudio::Error> {
+fn record_sound(_bitrate: Bitrate, frequency: Frequency, should_stop: Arc<AtomicBool>, sender: mpsc::Sender<Sound>) -> Result<(), portaudio::Error> {
     match frequency {
         Frequency::Freq_8000 | Frequency::Freq_16000 => {}
         _ => panic!("Incorrect frequency was given, only 8k and 16k are supported.")
@@ -84,16 +86,16 @@ fn record_sound(bitrate: Bitrate, frequency: Frequency, should_stop: Arc<AtomicB
 
     // Construct the input stream parameters.
     let latency = input_info.default_low_input_latency;
-    let input_params = portaudio::StreamParameters::<u8>::new(def_input, /* channels */ 1, /* interleaved */ true, latency);
+    let input_params = portaudio::StreamParameters::<i16>::new(def_input, /* channels */ 1, /* interleaved */ true, latency);
 
     // Check that the stream format is supported.
     try!(portaudio.is_input_format_supported(input_params, u32::from(frequency) as f64));
     let settings = portaudio::InputStreamSettings::new(input_params, u32::from(frequency) as f64, 256);
 
-    let start_instant = Instant::now();
-
     let callback = move |portaudio::InputStreamCallbackArgs { buffer, .. }| {
-        sender.send(Sound::from_vec_u8(buffer.to_vec()));
+        sender.send(Sound::from_vec_i16(buffer.to_vec())).unwrap_or_else(|e| {
+            error!("Got an error while sending the recording sound to the nuance thread: {}", e);
+        });
 
         if should_stop.load(Ordering::Relaxed) {
             println!("Ending recording.");
@@ -130,14 +132,14 @@ fn test_stt() {
         io::stdin().read_line(&mut input).unwrap();
         input.clear(); // we don't really care about this
 
-        let bitrate = Bitrate::Bits_8;
-        let frequency = Frequency::Freq_8000;
+        let bitrate = Bitrate::Bits_16;
+        let frequency = Frequency::Freq_16000;
 
         let (audio_sender, audio_receiver) = mpsc::channel();
 
         println!("Starting Nuance request...");
         let nuance = Nuance::with_bitrate_frequency(bitrate, frequency);
-        let result = nuance.stt(audio_receiver, langtag!(eng;;;USA));
+        let response = nuance.stt(audio_receiver, langtag!(eng;;;USA));
         println!("Recording sound...");
 
         println!("Press enter to stop recording.");
@@ -151,6 +153,10 @@ fn test_stt() {
         input.clear(); // we don't really care about this
         should_stop.store(true, Ordering::Relaxed);
         recording_handle.join().unwrap();
+
+        for line in response.text_receiver {
+            println!("{}", line);
+        }
     }
 }
 

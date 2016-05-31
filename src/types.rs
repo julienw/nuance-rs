@@ -64,4 +64,8 @@ impl Sound {
         let vec_i8 = vec.drain(..).map(|frame| frame as i8).collect();
         Sound::Bits_8(vec_i8)
     }
+
+    pub fn from_vec_i16(vec: Vec<i16>) -> Sound {
+        Sound::Bits_16(vec)
+    }
 }
