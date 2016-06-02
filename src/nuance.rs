@@ -22,7 +22,6 @@ struct NuanceConfig {
     user_opaque_id: String,
     asr_uri: String,
     tts_uri: String,
-    stt_uri: String,
 }
 
 impl NuanceConfig {
@@ -37,7 +36,6 @@ impl NuanceConfig {
             user_opaque_id: general_section.get("user_opaque_id").unwrap().to_string(),
             asr_uri: general_section.get("asr_uri").unwrap().to_string(),
             tts_uri: general_section.get("tts_uri").unwrap().to_string(),
-            stt_uri: general_section.get("stt_uri").unwrap().to_string(),
         }
     }
 
@@ -48,10 +46,6 @@ impl NuanceConfig {
 
         if !self.tts_uri.starts_with("https:") {
             self.tts_uri = "https://".to_string() + &self.tts_uri;
-        }
-
-        if !self.stt_uri.starts_with("https:") {
-            self.stt_uri = "https://".to_string() + &self.stt_uri;
         }
 
         self
@@ -263,7 +257,7 @@ struct NuanceStt {
 impl NuanceStt {
     fn request<B: Read>(config: &NuanceConfig, language: LanguageTag, bitrate: Bitrate, frequency: Frequency, body: &mut B) -> NuanceStt {
         let client = Client::new();
-        let mut url = Url::parse(&config.stt_uri).unwrap();
+        let mut url = Url::parse(&config.asr_uri).unwrap();
         url.query_pairs_mut()
             .append_pair("appId", &config.app_id)
             .append_pair("appKey", &config.app_key)

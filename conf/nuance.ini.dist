@@ -3,6 +3,4 @@ app_key =
 user_opaque_id = 1
 asr_uri = dictation.nuancemobility.net/NMDPAsrCmdServlet/dictation
 tts_uri = tts.nuancemobility.net:443/NMDPTTSCmdServlet/tts
-# Note: stt_uri is also called "asr" or "dictation" in Nuance documentation
-stt_uri = dictation.nuancemobility.net/NMDPAsrCmdServlet/dictation
 
