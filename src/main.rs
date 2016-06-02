@@ -36,7 +36,7 @@ fn play_frames<T: portaudio::Sample + 'static>(frames: &[T], frequency: Frequenc
 
     // Check that the stream format is supported.
     try!(portaudio.is_output_format_supported(output_params, u32::from(frequency) as f64));
-    let settings = portaudio::OutputStreamSettings::new(output_params, u32::from(frequency) as f64, 1024);
+    let settings = portaudio::OutputStreamSettings::new(output_params, u32::from(frequency) as f64, 256);
 
     let mut stream = try!(portaudio.open_blocking_stream(settings));
     try!(stream.start());
