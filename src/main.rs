@@ -163,5 +163,14 @@ fn test_stt() {
 fn main() {
     env_logger::init().unwrap();
 
-    test_tts();
+    loop {
+        let mut input = String::new();
+        println!("Do you want to test text-to-speech or speech-to-text ? [tts|stt]");
+        io::stdin().read_line(&mut input).unwrap();
+        match &*input.trim() {
+            "tts" => test_tts(),
+            "stt" => test_stt(),
+            _ => println!("Command was unknown")
+        }
+    }
 }
