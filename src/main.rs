@@ -163,5 +163,5 @@ fn test_stt() {
 fn main() {
     env_logger::init().unwrap();
 
-    test_stt();
+    test_tts();
 }

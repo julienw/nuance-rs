@@ -8,7 +8,7 @@ use hyper::header::{ ContentType, Accept, AcceptLanguage, Encoding, TransferEnco
 use hyper::mime::{ Mime, TopLevel, SubLevel };
 use hyper::LanguageTag;
 
-use byteorder::{ LittleEndian, WriteBytesExt };
+use byteorder::{ LittleEndian, WriteBytesExt, ReadBytesExt };
 
 use types::*;
 
@@ -120,18 +120,21 @@ impl Nuance {
             (bitrate, frequency)
         };
 
-        let mut body: Vec<u8> = Vec::new();
-        res.read_to_end(&mut body).unwrap();
+        debug!("bitrate is {:?}, frequency is {:?}", bitrate, frequency);
 
         let body = match bitrate {
             Bitrate::Bits_8 => {
-                let body_8bits: Vec<i8> = body.drain(..).map(|data| data as i8).collect();
+                let mut body_8bits: Vec<i8> = Vec::new();
+                while let Ok(res) = res.read_i8() {
+                    body_8bits.push(res);
+                }
                 Sound::Bits_8(body_8bits)
             }
             Bitrate::Bits_16 => {
-                let body_16bits: Vec<i16> = body.chunks(2).map(|data| {
-                    ((data[0] as i16) << 0) | ((data[1] as i16) << 8)
-                }).collect();
+                let mut body_16bits: Vec<i16> = Vec::new();
+                while let Ok(res) = res.read_i16::<LittleEndian>() {
+                    body_16bits.push(res);
+                }
                 Sound::Bits_16(body_16bits)
             }
         };
